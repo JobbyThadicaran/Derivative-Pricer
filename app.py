@@ -179,8 +179,12 @@ with st.sidebar:
     st.markdown("---")
 
     # Option type
-    option_type = st.selectbox("Option Type", ["Call", "Put"], index=0,
-                               help="European Call or Put option")
+    col_type1, col_type2 = st.columns(2)
+    with col_type1:
+        option_type = st.selectbox("Option Type", ["Call", "Put"], index=0)
+    with col_type2:
+        position_type = st.selectbox("Position", ["Long", "Short"], index=0,
+                                     help="Are you buying (Long) or selling (Short) this option?")
 
     st.markdown("### 📌 Market Data")
     spot = st.number_input("Spot Price (S)", min_value=0.01, value=100.0,
@@ -241,8 +245,8 @@ try:
         repo_rate=repo_pct / 100.0,
     )
     model = BlackScholesModel(inputs)
-    cash = CashGreeks(model, option_type, lots, multiplier)
-    pnl_sim = PnLSimulator(model, option_type, lots, multiplier)
+    cash = CashGreeks(model, option_type, position_type, lots, multiplier)
+    pnl_sim = PnLSimulator(model, option_type, position_type, lots, multiplier)
 
     pricing_ok = True
 except ValueError as e:
@@ -266,8 +270,8 @@ if pricing_ok:
     # ==================================================================
     # Tab layout
     # ==================================================================
-    tab_pricing, tab_greeks, tab_charts, tab_pnl, tab_batch = st.tabs([
-        "💰 Pricing", "📐 Greeks", "📊 Charts", "📈 P&L Simulation", "📦 Batch Scaling"
+    tab_pricing, tab_greeks, tab_charts, tab_pnl, tab_intelligence, tab_batch = st.tabs([
+        "💰 Pricing", "📐 Greeks", "📊 Charts", "📈 P&L Simulation", "🧠 Intelligence Layer", "📦 Batch Scaling"
     ])
 
     # ==================================================================
@@ -580,7 +584,162 @@ if pricing_ok:
             st.plotly_chart(fig_heatmap, use_container_width=True)
 
     # ==================================================================
-    # TAB 5 — Batch Scaling
+    # TAB 5 — Trading Intelligence Layer
+    # ==================================================================
+    with tab_intelligence:
+        st.markdown("### 🧠 Trading Intelligence Layer")
+        
+        # 1. Position Exposure & Interpretation
+        st.markdown("#### 🛡️ Position Risk Interpretation")
+        col_risk1, col_risk2 = st.columns([1, 2])
+        
+        with col_risk1:
+            st.markdown(f"**Current Mode:** {position_type} {option_type}")
+            unit_delta = model.delta(option_type)
+            unit_gamma = model.gamma()
+            unit_vega = model.vega()
+            
+            # Exposure cards
+            st.write(f"Net Delta: `{cash.cash_delta():+,.2f}`")
+            st.write(f"Net Gamma: `{cash.cash_gamma():+,.2f}`")
+            st.write(f"Net Vega: `{cash.cash_vega():+,.2f}`")
+            
+        with col_risk2:
+            st.markdown('<div class="info-box">', unsafe_allow_html=True)
+            if position_type == "Long":
+                if option_type == "Call":
+                    st.write("🟢 **Bullish View**: You benefit from an increase in the spot price.")
+                else:
+                    st.write("🔴 **Bearish View**: You benefit from a decrease in the spot price.")
+                st.write("🚀 **Long Gamma**: You benefit from high volatility (convexity profit).")
+                st.write("🌊 **Long Vega**: You profit if implied volatility rises.")
+                st.write("⏳ **Theta Decay**: You are paying 'rent' for this position daily.")
+            else:
+                if option_type == "Call":
+                    st.write("🔴 **Bearish/Neutral View**: You profit if the spot stays below the strike.")
+                else:
+                    st.write("🟢 **Bullish/Neutral View**: You profit if the spot stays above the strike.")
+                st.write("📉 **Short Gamma**: Large spot moves hurt you; you prefer a stable market.")
+                st.write("🔥 **Short Vega**: A vol spike (fear) will increase the option value you sold, hurting you.")
+                st.write("💰 **Theta Income**: You are 'collecting rent' from time decay.")
+            st.markdown('</div>', unsafe_allow_html=True)
+
+        st.markdown("---")
+
+        # 2. Scenario Engine
+        st.markdown("#### ⚡ Scenario Engine (Shock Buttons)")
+        st.markdown("Select a quick shock to see the estimated P&L decomposition.")
+        
+        col_btn1, col_btn2, col_btn3, col_btn4, col_btn5 = st.columns(5)
+        
+        shock_ds = 0.0
+        shock_dv = 0.0
+        
+        if col_btn1.button("Spot +1%"): shock_ds = spot * 0.01
+        if col_btn2.button("Spot +3%"): shock_ds = spot * 0.03
+        if col_btn3.button("Spot +5%"): shock_ds = spot * 0.05
+        if col_btn4.button("Vol +1 pt"): shock_dv = 1.0
+        if col_btn5.button("Vol +2 pts"): shock_dv = 2.0
+        
+        if shock_ds != 0 or shock_dv != 0:
+            decomp = pnl_sim.compute_pnl_decomposition(shock_ds, shock_dv)
+            st.markdown("**Estimated P&L Breakdown:**")
+            col_dec1, col_dec2, col_dec3, col_dec4 = st.columns(4)
+            col_dec1.metric("Delta P&L", f"${decomp['Delta P&L']:+,.2f}")
+            col_dec2.metric("Gamma P&L", f"${decomp['Gamma P&L']:+,.2f}")
+            col_dec3.metric("Vega P&L", f"${decomp['Vega P&L']:+,.2f}")
+            col_dec4.metric("Total Approx", f"${decomp['Total Approx P&L']:+,.2f}", 
+                           delta_color="normal")
+            
+            st.info(f"Analysis: For a Spot shock of ${shock_ds:,.2f} and Vol shock of {shock_dv:,.1f} pts.")
+
+        st.markdown("---")
+
+        # 3. Interview Mode (Cases)
+        st.markdown("#### 🎓 Interview Mode (Preloaded Cases)")
+        case = st.selectbox("Select a Practice Case:", [
+            "Select a case...",
+            "Spot moves +5% → Estimate P&L",
+            "Vol +2 pts → Compute Vega Impact",
+            "Time passes 1 week → Calculate Theta Bleed"
+        ])
+        
+        if case != "Select a case...":
+            st.markdown('<div class="info-box">', unsafe_allow_html=True)
+            if "Spot moves +5%" in case:
+                ds_val = spot * 0.05
+                d_pnl = model.delta(option_type) * ds_val * lots * multiplier * (1 if position_type=="Long" else -1)
+                g_pnl = 0.5 * model.gamma() * (ds_val**2) * lots * multiplier * (1 if position_type=="Long" else -1)
+                st.write(f"**Intuition**: A 5% move ($ {ds_val:,.2f}) creates linear P&L from Delta and quadratic P&L from Gamma.")
+                st.write(f"• Linear Delta Impact: **${d_pnl:,.2f}**")
+                st.write(f"• Convexity (Gamma) Impact: **${g_pnl:,.2f}**")
+                st.write("**Rule of Thumb**: Gamma is your best friend when long and spot moves big.")
+            elif "Vol +2 pts" in case:
+                v_impact = model.vega() * 2.0 * lots * multiplier * (1 if position_type=="Long" else -1)
+                st.write(f"**Intuition**: Vega measures the price change per 1% move in implied volatility.")
+                st.write(f"• Total Vega Impact: **${v_impact:,.2f}**")
+                st.write("**Rule of Thumb**: For every 1% vol goes up, you make/lose your cash vega.")
+            elif "1 week" in case:
+                t_impact = model.theta(option_type) * 7 * lots * multiplier * (1 if position_type=="Long" else -1)
+                st.write(f"**Intuition**: Theta is the daily cost of holding the option.")
+                st.write(f"• 7-Day Theta Impact: **${t_impact:,.2f}**")
+                st.write("**Rule of Thumb**: Theta accelerates as you get closer to expiry.")
+            st.markdown('</div>', unsafe_allow_html=True)
+
+        st.markdown("---")
+
+        # 4. Expiry Behavior & Pin Risk
+        st.markdown("#### 📅 Expiry Behavior (Gamma Risk)")
+        st.markdown("See how Delta jumps as spot crosses the Strike near expiry.")
+        
+        days_to_expiry = st.slider("Days to Expiry", 0.1, 10.0, 1.0, 0.1)
+        exp_T = days_to_expiry / 365.0
+        exp_spots = np.linspace(strike * 0.95, strike * 1.05, 100)
+        
+        exp_deltas = []
+        for s in exp_spots:
+            try:
+                m = BlackScholesModel(BlackScholesInputs(s, strike, exp_T, vol_pct/100, rate_pct/100, div_pct/100))
+                exp_deltas.append(m.delta(option_type))
+            except: exp_deltas.append(np.nan)
+            
+        fig_exp = go.Figure()
+        fig_exp.add_trace(go.Scatter(x=exp_spots, y=exp_deltas, name="Delta", line=dict(color="#f472b6", width=3)))
+        fig_exp.add_vline(x=strike, line_dash="dash", line_color="white", annotation_text="STRIKE")
+        fig_exp.update_layout(title=f"Delta Profile at {days_to_expiry:.1f} Days to Expiry", 
+                            xaxis_title="Spot Price", yaxis_title="Delta", **PLOTLY_LAYOUT)
+        st.plotly_chart(fig_exp, use_container_width=True)
+        st.write("💡 **Pin Risk**: Notice how the Delta curve becomes a step function as time to expiry $\\to 0$. This makes hedging extremely difficult near the strike.")
+
+        st.markdown("---")
+
+        # 5. Forward Intuition Panel
+        st.markdown("#### 🔭 Forward Intuition Panel")
+        fwd_price = model.forward_price()
+        diff = fwd_price - spot
+        
+        col_fwd1, col_fwd2 = st.columns(2)
+        with col_fwd1:
+            st.metric("Forward Price", f"{fwd_price:,.4f}")
+            st.write(f"Forward Premium: `{diff:+,.4f}` points")
+        
+        with col_fwd2:
+            st.markdown('<div class="info-box">', unsafe_allow_html=True)
+            st.write("**Impact of Dividends:**")
+            st.write("Rising dividends **reduce** the Forward Price.")
+            st.write("• Calls become **cheaper** (you lose dividend income while holding the call).")
+            st.write("• Puts become **more expensive**.")
+            st.markdown('</div>', unsafe_allow_html=True)
+            
+        div_shock = st.slider("Dividend Shock (%)", -5.0, 5.0, 0.0, 0.5)
+        if div_shock != 0:
+            new_q = max(0, (div_pct + div_shock) / 100.0)
+            new_model = BlackScholesModel(BlackScholesInputs(spot, strike, maturity, vol_pct/100, rate_pct/100, new_q))
+            new_price = new_model.option_price(option_type)
+            st.write(f"Price after Dividend Shock: **{new_price:,.4f}** (Change: `{new_price - model.option_price(option_type):+,.4f}`)")
+
+    # ==================================================================
+    # TAB 6 — Batch Scaling
     # ==================================================================
     with tab_batch:
         st.markdown("#### 📦 Batch Lot Comparison")

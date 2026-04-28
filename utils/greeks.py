@@ -52,11 +52,13 @@ class CashGreeks:
     """
 
     def __init__(self, model: BlackScholesModel, option_type: str = "Call",
-                 lots: int = 1, multiplier: float = 1.0):
+                 position_type: str = "Long", lots: int = 1, multiplier: float = 1.0):
         self.model = model
         self.option_type = option_type
+        self.position_type = position_type  # "Long" or "Short"
         self.lots = lots
         self.multiplier = multiplier
+        self._pos_sign = 1.0 if position_type.lower() == "long" else -1.0
 
     @property
     def notional(self) -> float:
@@ -64,26 +66,26 @@ class CashGreeks:
         return self.model.inputs.spot * self.lots * self.multiplier
 
     # ------------------------------------------------------------------
-    # Cash Greeks
+    # Cash Greeks (Adjusted for Position Type)
     # ------------------------------------------------------------------
 
     def cash_delta(self) -> float:
-        """Cash Delta = Delta × Spot × Lots × Multiplier."""
+        """Cash Delta = Delta × Spot × Lots × Multiplier × Sign."""
         return (self.model.delta(self.option_type)
-                * self.model.inputs.spot * self.lots * self.multiplier)
+                * self.model.inputs.spot * self.lots * self.multiplier * self._pos_sign)
 
     def cash_gamma(self) -> float:
-        """Cash Gamma = Gamma × Spot² × Lots × Multiplier."""
+        """Cash Gamma = Gamma × Spot² × Lots × Multiplier × Sign."""
         S = self.model.inputs.spot
-        return self.model.gamma() * S * S * self.lots * self.multiplier
+        return self.model.gamma() * S * S * self.lots * self.multiplier * self._pos_sign
 
     def cash_vega(self) -> float:
-        """Cash Vega = Vega × Lots × Multiplier (per 1% vol move)."""
-        return self.model.vega() * self.lots * self.multiplier
+        """Cash Vega = Vega × Lots × Multiplier × Sign (per 1% vol move)."""
+        return self.model.vega() * self.lots * self.multiplier * self._pos_sign
 
     def cash_theta(self) -> float:
-        """Cash Theta = Theta × Lots × Multiplier (per day)."""
-        return self.model.theta(self.option_type) * self.lots * self.multiplier
+        """Cash Theta = Theta × Lots × Multiplier × Sign (per day)."""
+        return self.model.theta(self.option_type) * self.lots * self.multiplier * self._pos_sign
 
     def cash_rho(self) -> float:
         """Cash Rho = Rho × Lots × Multiplier (per 1% rate move)."""
@@ -127,12 +129,36 @@ class PnLSimulator:
     """
 
     def __init__(self, model: BlackScholesModel, option_type: str = "Call",
-                 lots: int = 1, multiplier: float = 1.0):
+                 position_type: str = "Long", lots: int = 1, multiplier: float = 1.0):
         self.model = model
         self.option_type = option_type
+        self.position_type = position_type
         self.lots = lots
         self.multiplier = multiplier
+        self._pos_sign = 1.0 if position_type.lower() == "long" else -1.0
         self._base_price = model.option_price(option_type)
+
+    def compute_pnl_decomposition(self, ds: float, dv: float) -> dict:
+        """
+        Compute P&L breakdown for a given spot change (ds) and vol change (dv).
+        
+        dv is in percentage points (e.g. 1.0 for a +1% vol move).
+        """
+        delta = self.model.delta(self.option_type)
+        gamma = self.model.gamma()
+        vega = self.model.vega()  # per 1% move
+        scale = self.lots * self.multiplier * self._pos_sign
+
+        delta_pnl = delta * ds * scale
+        gamma_pnl = 0.5 * gamma * (ds**2) * scale
+        vega_pnl = vega * dv * scale
+
+        return {
+            "Delta P&L": delta_pnl,
+            "Gamma P&L": gamma_pnl,
+            "Vega P&L": vega_pnl,
+            "Total Approx P&L": delta_pnl + gamma_pnl + vega_pnl
+        }
 
     def spot_pnl(self, spot_shocks: np.ndarray) -> pd.DataFrame:
         """
