@@ -28,14 +28,15 @@ A production-ready **European options pricing dashboard** built with Python and 
 | Feature | Description |
 |---------|-------------|
 | **European Option Pricing** | Analytical Black-Scholes pricing for Calls and Puts |
+| **Trading Intelligence Layer**| Advanced decision tools: Scenario Engine, Interview Mode, and Pin Risk |
+| **P&L Decomposition** | Breakdown of P&L into Delta, Gamma, and Vega components |
+| **Position Mode** | Toggle Long/Short to view net exposure and risk interpretations |
 | **Full Greeks Suite** | Delta, Gamma, Vega, Theta, Rho — both unit and cash values |
 | **Cash Greeks** | Dollar-denominated risk metrics scaled by position size |
 | **Interactive Charts** | Option Price vs Spot, Delta vs Spot, Gamma vs Spot |
 | **P&L Simulation** | Spot shock, vol shock, and combined heatmap analysis |
 | **Batch Scaling** | Compare Greeks across 1, 10, 100, 1000 lots side-by-side |
-| **Forward Pricing** | Computes the theoretical forward price of the underlying |
-| **Dividend & Repo** | Supports continuous dividend yield and repo rate adjustments |
-| **Error Handling** | Input validation with informative error messages |
+| **Forward Intuition** | Spot vs Forward dynamics and dividend shock sensitivity |
 
 ---
 
