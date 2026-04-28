@@ -22,6 +22,41 @@ from utils.greeks import CashGreeks, PnLSimulator
 
 
 # ======================================================================
+# Cached Calculations for Performance
+# ======================================================================
+@st.cache_data
+def get_pnl_matrix(inputs_dict, option_type, position_type, lots, multiplier, ds_array, dv_array):
+    """Cache the heavy heatmap matrix calculation."""
+    inputs = BlackScholesInputs(**inputs_dict)
+    model = BlackScholesModel(inputs)
+    pnl_sim = PnLSimulator(model, option_type, position_type, lots, multiplier)
+    return pnl_sim.combined_pnl_matrix(ds_array, dv_array)
+
+@st.cache_data
+def get_batch_data(inputs_dict, option_type, position_type, lot_sizes, multiplier):
+    """Cache the batch scaling table."""
+    inputs = BlackScholesInputs(**inputs_dict)
+    model = BlackScholesModel(inputs)
+    batch_rows = []
+    
+    option_price = model.option_price(option_type)
+    pos_sign = 1.0 if position_type == "Long" else -1.0
+    
+    for lot_size in lot_sizes:
+        batch_cash = CashGreeks(model, option_type, position_type, lot_size, multiplier)
+        batch_rows.append({
+            "Lots": lot_size,
+            "Total Premium": (pos_sign * option_price * lot_size * multiplier),
+            "Cash Delta": batch_cash.cash_delta(),
+            "Cash Gamma": batch_cash.cash_gamma(),
+            "Cash Vega": batch_cash.cash_vega(),
+            "Cash Theta": batch_cash.cash_theta(),
+            "Cash Rho": batch_cash.cash_rho(),
+        })
+    return pd.DataFrame(batch_rows)
+
+
+# ======================================================================
 # Page Configuration
 # ======================================================================
 st.set_page_config(
@@ -570,7 +605,14 @@ if pricing_ok:
         combined_spot_abs = spot * combined_spot_pct / 100.0
         combined_vol = np.linspace(vol_shock_min, vol_shock_max, 11)
 
-        pnl_matrix = pnl_sim.combined_pnl_matrix(combined_spot_abs, combined_vol)
+        # Use cached calculation
+        inputs_dict = {
+            "spot": spot, "strike": strike, "maturity": maturity,
+            "volatility": vol_pct/100, "risk_free_rate": rate_pct/100,
+            "dividend_yield": div_pct/100, "repo_rate": repo_pct/100
+        }
+        pnl_matrix = get_pnl_matrix(inputs_dict, option_type, position_type, lots, multiplier, combined_spot_abs, combined_vol)
+        
         pnl_matrix.index = [f"S {pct:+.1f}%" for pct in combined_spot_pct]
         pnl_matrix.columns = [f"Vol {pts:+.1f}pts" for pts in combined_vol]
 
@@ -777,56 +819,19 @@ if pricing_ok:
         """, unsafe_allow_html=True)
 
         try:
-            lot_sizes = [int(x.strip()) for x in batch_lots.split(",") if x.strip()]
+            lot_sizes = tuple(int(x.strip()) for x in batch_lots.split(",") if x.strip())
         except ValueError:
-            lot_sizes = [1, 10, 100, 1000]
+            lot_sizes = (1, 10, 100, 1000)
             st.warning("Could not parse lot sizes. Using defaults: 1, 10, 100, 1000")
 
-        batch_rows = []
-        for lot_size in lot_sizes:
-            batch_cash = CashGreeks(model, option_type, position_type, lot_size, multiplier)
-            batch_rows.append({
-                "Lots": lot_size,
-                "Total Premium": signed_total_price / lots * lot_size, # scaled correctly
-                "Cash Delta": batch_cash.cash_delta(),
-                "Cash Gamma": batch_cash.cash_gamma(),
-                "Cash Vega": batch_cash.cash_vega(),
-                "Cash Theta": batch_cash.cash_theta(),
-                "Cash Rho": batch_cash.cash_rho(),
-            })
+        inputs_dict = {
+            "spot": spot, "strike": strike, "maturity": maturity,
+            "volatility": vol_pct/100, "risk_free_rate": rate_pct/100,
+            "dividend_yield": div_pct/100, "repo_rate": repo_pct/100
+        }
+        batch_df = get_batch_data(inputs_dict, option_type, position_type, lot_sizes, multiplier)
 
-        batch_df = pd.DataFrame(batch_rows)
-
-        # Format numerically
-        for col in batch_df.columns[1:]:
-            batch_df[col] = batch_df[col].apply(lambda x: format_number(x, 2))
-
-        st.dataframe(batch_df, use_container_width=True, hide_index=True)
-
-        # Bar chart comparison
-        batch_numeric = pd.DataFrame(batch_rows)
-        fig_batch = make_subplots(rows=1, cols=2,
-                                  subplot_titles=["Total Premium by Lot Size",
-                                                  "Cash Delta by Lot Size"])
-
-        fig_batch.add_trace(go.Bar(
-            x=[str(l) for l in lot_sizes],
-            y=batch_numeric["Total Premium"],
-            name="Premium",
-            marker_color="#818cf8",
-        ), row=1, col=1)
-
-        fig_batch.add_trace(go.Bar(
-            x=[str(l) for l in lot_sizes],
-            y=batch_numeric["Cash Delta"],
-            name="Cash Delta",
-            marker_color="#34d399",
-        ), row=1, col=2)
-
-        fig_batch.update_layout(
-            **PLOTLY_LAYOUT,
-            showlegend=False,
-            height=400,
+        if not batch_df.empty:
         )
         st.plotly_chart(fig_batch, use_container_width=True)
 
