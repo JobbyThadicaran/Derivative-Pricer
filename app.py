@@ -647,8 +647,36 @@ if pricing_ok:
 
 
 # ======================================================================
-# Footer
+# Methodology & Help
 # ======================================================================
+with st.expander("📚 Methodology & Financial Logic"):
+    st.markdown("""
+    ### The Black-Scholes Model
+    This application uses the analytical Black-Scholes-Merton model for European options.
+    
+    **Core Assumptions:**
+    *   **Geometric Brownian Motion**: Underlying price follows $dS = (r-q)Sdt + \sigma SdW$.
+    *   **Log-normal Distribution**: Asset prices at expiry are log-normally distributed.
+    *   **Continuous Trading**: No transaction costs or liquidity constraints.
+    *   **European Style**: Options can only be exercised at the exact moment of expiration.
+
+    ### The Greeks & Risk Management
+    *   **Delta ($\Delta$)**: The hedge ratio. Represents the equivalent number of shares of the underlying.
+    *   **Gamma ($\Gamma$)**: The 'convexity' of the option. High gamma indicates that delta changes rapidly as the spot moves.
+    *   **Vega ($\nu$)**: Sensitivity to a 1% change in Implied Volatility.
+    *   **Theta ($\Theta$)**: The cost of 'renting' the optionality (time decay).
+
+    ### Cash Greeks Calculation
+    Traders manage risk in dollar terms. We convert unit Greeks to **Cash Greeks**:
+    *   **Cash Delta** = $\Delta \times \text{Spot} \times \text{Lots} \times \text{Multiplier}$
+    *   **Cash Gamma** = $\Gamma \times \text{Spot}^2 \times \text{Lots} \times \text{Multiplier}$
+
+    ### P&L Approximation (Taylor Expansion)
+    The simulated P&L uses the second-order Taylor expansion:
+    $$\Delta PnL \approx \Delta \cdot \delta S + \frac{1}{2} \Gamma \cdot (\delta S)^2 + \text{Vega} \cdot \delta \sigma + \Theta \cdot \delta t$$
+    """)
+
+# Footer
 st.markdown("---")
 st.markdown("""
 <div style="text-align: center; color: #6366f1; font-size: 0.85rem; padding: 16px 0;">
