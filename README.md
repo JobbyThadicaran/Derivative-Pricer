@@ -135,8 +135,8 @@ Derivative-Pricer/
 
 ### Prerequisites
 
-- Python 3.9+
-- pip
+- [uv](https://github.com/astral-sh/uv) (Recommended)
+- Python 3.11+
 
 ### Steps
 
@@ -145,16 +145,11 @@ Derivative-Pricer/
 git clone https://github.com/JobbyThadicaran/Derivative-Pricer.git
 cd Derivative-Pricer
 
-# 2. Create a virtual environment (recommended)
-python -m venv venv
-source venv/bin/activate  # macOS/Linux
-# or: venv\Scripts\activate  # Windows
+# 2. Install dependencies and sync environment
+uv sync
 
-# 3. Install dependencies
-pip install -r requirements.txt
-
-# 4. Run the application
-streamlit run app.py
+# 3. Run the application
+uv run streamlit run app.py
 ```
 
 The app will open in your browser at `http://localhost:8501`.
@@ -169,6 +164,7 @@ The app will open in your browser at `http://localhost:8501`.
 4. **Explore Charts** — Interactive Plotly charts show how price, delta, and gamma vary with spot
 5. **Simulate P&L** — Use sliders to stress-test the position across spot and vol shocks; view the P&L heatmap
 6. **Batch Scale** — Compare positions across multiple lot sizes
+7. **Read Methodology** — Open the "Methodology & Financial Logic" expander at the bottom for formulas and intuition.
 
 ### Default Parameters
 
