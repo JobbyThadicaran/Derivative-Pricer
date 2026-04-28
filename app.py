@@ -151,6 +151,18 @@ st.markdown("""
 
 
 # ======================================================================
+# Session State Initialization
+# ======================================================================
+if 'shock_ds_pct' not in st.session_state:
+    st.session_state.shock_ds_pct = 0.0
+if 'shock_dv' not in st.session_state:
+    st.session_state.shock_dv = 0.0
+
+def reset_shocks():
+    st.session_state.shock_ds_pct = 0.0
+    st.session_state.shock_dv = 0.0
+
+# ======================================================================
 # Helper: Plotly theme
 # ======================================================================
 PLOTLY_LAYOUT = dict(
@@ -281,13 +293,16 @@ if pricing_ok:
         col1, col2, col3, col4 = st.columns(4)
 
         option_price = model.option_price(option_type)
-        total_price = option_price * lots * multiplier
+        pos_sign = 1.0 if position_type == "Long" else -1.0
+        signed_total_price = pos_sign * option_price * lots * multiplier
         fwd = model.forward_price()
+
+        premium_label = "Premium Paid (Outflow)" if position_type == "Long" else "Premium Received (Inflow)"
 
         with col1:
             st.metric("Option Price (per unit)", format_number(option_price))
         with col2:
-            st.metric("Total Premium", format_number(total_price, 2))
+            st.metric(premium_label, format_number(signed_total_price, 2))
         with col3:
             st.metric("Forward Price", format_number(fwd, 4))
         with col4:
@@ -342,10 +357,10 @@ if pricing_ok:
     # TAB 2 — Greeks
     # ==================================================================
     with tab_greeks:
-        st.markdown("#### Unit Greeks & Cash Greeks")
+        st.markdown(f"#### {position_type} Position: Unit & Cash Greeks")
 
         greeks_df = cash.summary_table()
-        greeks_df["Unit Value"] = greeks_df["Unit Value"].apply(lambda x: format_number(x, 6))
+        greeks_df["Unit Value (Signed)"] = greeks_df["Unit Value (Signed)"].apply(lambda x: format_number(x, 6))
         greeks_df["Cash Value"] = greeks_df["Cash Value"].apply(lambda x: format_number(x, 2))
         st.dataframe(greeks_df, use_container_width=True, hide_index=True)
 
@@ -357,12 +372,13 @@ if pricing_ok:
         greek_icons = ["📐", "📏", "🌊", "⏳", "💹"]
         unit_greeks = model.all_greeks(option_type)
         cash_greeks = cash.all_cash_greeks()
+        pos_sign = 1.0 if position_type == "Long" else -1.0
 
         for i, (name, icon) in enumerate(zip(greek_names, greek_icons)):
             with cols[i]:
                 st.metric(
                     f"{icon} {name}",
-                    format_number(unit_greeks[name], 6),
+                    format_number(unit_greeks[name] * pos_sign, 6),
                     delta=f"Cash: {format_number(cash_greeks[f'Cash {name}'], 2)}",
                 )
 
@@ -481,36 +497,36 @@ if pricing_ok:
         st.markdown("#### 📈 Spot Shock P&L")
         col_s1, col_s2 = st.columns(2)
         with col_s1:
-            spot_shock_min = st.slider("Min Spot Shock (%)", -50.0, 0.0, -20.0, 1.0)
+            spot_shock_min_pct = st.slider("Min Spot Shock (%)", -50.0, 0.0, -20.0, 1.0)
         with col_s2:
-            spot_shock_max = st.slider("Max Spot Shock (%)", 0.0, 50.0, 20.0, 1.0)
+            spot_shock_max_pct = st.slider("Max Spot Shock (%)", 0.0, 50.0, 20.0, 1.0)
 
-        spot_shocks = np.linspace(
-            spot * spot_shock_min / 100.0,
-            spot * spot_shock_max / 100.0,
-            50
-        )
+        # UI in %, internal in $
+        spot_shocks_pct = np.linspace(spot_shock_min_pct, spot_shock_max_pct, 50)
+        spot_shocks_abs = spot * spot_shocks_pct / 100.0
 
-        spot_pnl_df = pnl_sim.spot_pnl(spot_shocks)
+        spot_pnl_df = pnl_sim.spot_pnl(spot_shocks_abs)
+        # Add the % back for display
+        spot_pnl_df["Spot Shock (%)"] = spot_shocks_pct
 
         if not spot_pnl_df.empty:
             fig_spot_pnl = go.Figure()
             fig_spot_pnl.add_trace(go.Scatter(
-                x=spot_pnl_df["Spot Shock"], y=spot_pnl_df["Full Reprice P&L"],
+                x=spot_pnl_df["Spot Shock (%)"], y=spot_pnl_df["Full Reprice P&L"],
                 name="Full Reprice", line=dict(color="#818cf8", width=3),
             ))
             fig_spot_pnl.add_trace(go.Scatter(
-                x=spot_pnl_df["Spot Shock"], y=spot_pnl_df["Delta P&L"],
+                x=spot_pnl_df["Spot Shock (%)"], y=spot_pnl_df["Delta P&L"],
                 name="Delta P&L", line=dict(color="#34d399", width=2, dash="dash"),
             ))
             fig_spot_pnl.add_trace(go.Scatter(
-                x=spot_pnl_df["Spot Shock"], y=spot_pnl_df["Approx P&L"],
+                x=spot_pnl_df["Spot Shock (%)"], y=spot_pnl_df["Approx P&L"],
                 name="Delta+Gamma Approx", line=dict(color="#fbbf24", width=2, dash="dot"),
             ))
             fig_spot_pnl.add_hline(y=0, line_color="rgba(255,255,255,0.3)")
             fig_spot_pnl.update_layout(
-                title="P&L vs Spot Shock",
-                xaxis_title="Spot Shock ($)",
+                title="P&L vs Spot Shock (%)",
+                xaxis_title="Spot Shock (%)",
                 yaxis_title="P&L ($)",
                 **PLOTLY_LAYOUT,
             )
@@ -521,9 +537,9 @@ if pricing_ok:
 
         col_v1, col_v2 = st.columns(2)
         with col_v1:
-            vol_shock_min = st.slider("Min Vol Shock (%pts)", -15.0, 0.0, -10.0, 0.5)
+            vol_shock_min = st.slider("Min Vol Shock (percentage points)", -15.0, 0.0, -10.0, 0.5)
         with col_v2:
-            vol_shock_max = st.slider("Max Vol Shock (%pts)", 0.0, 15.0, 10.0, 0.5)
+            vol_shock_max = st.slider("Max Vol Shock (percentage points)", 0.0, 15.0, 10.0, 0.5)
 
         vol_shocks = np.linspace(vol_shock_min, vol_shock_max, 40)
         vol_pnl_df = pnl_sim.vol_pnl(vol_shocks)
@@ -540,25 +556,23 @@ if pricing_ok:
             ))
             fig_vol_pnl.add_hline(y=0, line_color="rgba(255,255,255,0.3)")
             fig_vol_pnl.update_layout(
-                title="P&L vs Volatility Shock",
-                xaxis_title="Vol Shock (%)",
+                title="P&L vs Volatility Shock (pts)",
+                xaxis_title="Vol Shock (percentage points)",
                 yaxis_title="P&L ($)",
                 **PLOTLY_LAYOUT,
             )
             st.plotly_chart(fig_vol_pnl, use_container_width=True)
 
         st.markdown("---")
-        st.markdown("#### 🔥 Combined P&L Heatmap (Spot × Vol)")
+        st.markdown("#### 🔥 Combined P&L Heatmap (Spot % × Vol pts)")
 
-        combined_spot = np.linspace(
-            spot * (1 + spot_shock_min / 100.0),
-            spot * (1 + spot_shock_max / 100.0),
-            15
-        ) - spot  # convert to shocks
-
+        combined_spot_pct = np.linspace(spot_shock_min_pct, spot_shock_max_pct, 15)
+        combined_spot_abs = spot * combined_spot_pct / 100.0
         combined_vol = np.linspace(vol_shock_min, vol_shock_max, 11)
 
-        pnl_matrix = pnl_sim.combined_pnl_matrix(combined_spot, combined_vol)
+        pnl_matrix = pnl_sim.combined_pnl_matrix(combined_spot_abs, combined_vol)
+        pnl_matrix.index = [f"S {pct:+.1f}%" for pct in combined_spot_pct]
+        pnl_matrix.columns = [f"Vol {pts:+.1f}pts" for pts in combined_vol]
 
         if not pnl_matrix.empty:
             fig_heatmap = go.Figure(data=go.Heatmap(
@@ -628,30 +642,39 @@ if pricing_ok:
 
         # 2. Scenario Engine
         st.markdown("#### ⚡ Scenario Engine (Shock Buttons)")
-        st.markdown("Select a quick shock to see the estimated P&L decomposition.")
+        st.markdown("Select shocks to see the combined estimated P&L decomposition.")
         
-        col_btn1, col_btn2, col_btn3, col_btn4, col_btn5 = st.columns(5)
+        col_btn1, col_btn2, col_btn3, col_btn4, col_btn5, col_btn6 = st.columns(6)
         
-        shock_ds = 0.0
-        shock_dv = 0.0
+        if col_btn1.button("Spot +1%"): st.session_state.shock_ds_pct += 1.0
+        if col_btn2.button("Spot +3%"): st.session_state.shock_ds_pct += 3.0
+        if col_btn3.button("Spot +5%"): st.session_state.shock_ds_pct += 5.0
+        if col_btn4.button("Vol +1 pt"): st.session_state.shock_dv += 1.0
+        if col_btn5.button("Vol +2 pts"): st.session_state.shock_dv += 2.0
+        if col_btn6.button("Reset Shocks", type="primary"): reset_shocks()
         
-        if col_btn1.button("Spot +1%"): shock_ds = spot * 0.01
-        if col_btn2.button("Spot +3%"): shock_ds = spot * 0.03
-        if col_btn3.button("Spot +5%"): shock_ds = spot * 0.05
-        if col_btn4.button("Vol +1 pt"): shock_dv = 1.0
-        if col_btn5.button("Vol +2 pts"): shock_dv = 2.0
+        # Display active shocks
+        st.write(f"Active Shocks: **Spot {st.session_state.shock_ds_pct:+.1f}%** | **Vol {st.session_state.shock_dv:+.1f} pts**")
         
-        if shock_ds != 0 or shock_dv != 0:
-            decomp = pnl_sim.compute_pnl_decomposition(shock_ds, shock_dv)
-            st.markdown("**Estimated P&L Breakdown:**")
+        if st.session_state.shock_ds_pct != 0 or st.session_state.shock_dv != 0:
+            abs_ds = spot * st.session_state.shock_ds_pct / 100.0
+            decomp = pnl_sim.compute_pnl_decomposition(abs_ds, st.session_state.shock_dv)
+            
+            st.markdown("**Estimated P&L Breakdown ($):**")
             col_dec1, col_dec2, col_dec3, col_dec4 = st.columns(4)
             col_dec1.metric("Delta P&L", f"${decomp['Delta P&L']:+,.2f}")
             col_dec2.metric("Gamma P&L", f"${decomp['Gamma P&L']:+,.2f}")
             col_dec3.metric("Vega P&L", f"${decomp['Vega P&L']:+,.2f}")
-            col_dec4.metric("Total Approx", f"${decomp['Total Approx P&L']:+,.2f}", 
-                           delta_color="normal")
+            col_dec4.metric("Total Approx", f"${decomp['Total Approx P&L']:+,.2f}")
             
-            st.info(f"Analysis: For a Spot shock of ${shock_ds:,.2f} and Vol shock of {shock_dv:,.1f} pts.")
+            st.markdown(f"""
+            <div style="font-size: 0.85rem; color: #a5b4fc; background: rgba(99, 102, 241, 0.1); padding: 10px; border-radius: 8px; border: 1px solid rgba(99, 102, 241, 0.2);">
+                <strong>Quant Formulas used:</strong><br>
+                • Δ P&L = Delta × ΔS × Lots × Multiplier × Sign<br>
+                • Γ P&L ≈ 0.5 × Gamma × (ΔS)² × Lots × Multiplier × Sign<br>
+                • Vega P&L = Vega × ΔVol(pts) × Lots × Multiplier × Sign
+            </div>
+            """, unsafe_allow_html=True)
 
         st.markdown("---")
 
@@ -659,31 +682,32 @@ if pricing_ok:
         st.markdown("#### 🎓 Interview Mode (Preloaded Cases)")
         case = st.selectbox("Select a Practice Case:", [
             "Select a case...",
-            "Spot moves +5% → Estimate P&L",
+            "Spot moves +5% → Estimate Gamma Impact",
             "Vol +2 pts → Compute Vega Impact",
             "Time passes 1 week → Calculate Theta Bleed"
         ])
         
         if case != "Select a case...":
             st.markdown('<div class="info-box">', unsafe_allow_html=True)
+            pos_sign = 1.0 if position_type == "Long" else -1.0
             if "Spot moves +5%" in case:
                 ds_val = spot * 0.05
-                d_pnl = model.delta(option_type) * ds_val * lots * multiplier * (1 if position_type=="Long" else -1)
-                g_pnl = 0.5 * model.gamma() * (ds_val**2) * lots * multiplier * (1 if position_type=="Long" else -1)
-                st.write(f"**Intuition**: A 5% move ($ {ds_val:,.2f}) creates linear P&L from Delta and quadratic P&L from Gamma.")
+                d_pnl = model.delta(option_type) * ds_val * lots * multiplier * pos_sign
+                g_pnl = 0.5 * model.gamma() * (ds_val**2) * lots * multiplier * pos_sign
+                st.write(f"**Intuition**: A 5% move (${ds_val:,.2f}) creates linear risk and convexity profit/loss.")
                 st.write(f"• Linear Delta Impact: **${d_pnl:,.2f}**")
                 st.write(f"• Convexity (Gamma) Impact: **${g_pnl:,.2f}**")
-                st.write("**Rule of Thumb**: Gamma is your best friend when long and spot moves big.")
+                st.write(f"**Formula**: $\\Gamma\\ PnL \\approx 0.5 \\times \\Gamma \\times (\\Delta S)^2$")
             elif "Vol +2 pts" in case:
-                v_impact = model.vega() * 2.0 * lots * multiplier * (1 if position_type=="Long" else -1)
-                st.write(f"**Intuition**: Vega measures the price change per 1% move in implied volatility.")
+                v_impact = model.vega() * 2.0 * lots * multiplier * pos_sign
+                st.write(f"**Intuition**: Vega measures the price change per 1 percentage point move in volatility.")
                 st.write(f"• Total Vega Impact: **${v_impact:,.2f}**")
-                st.write("**Rule of Thumb**: For every 1% vol goes up, you make/lose your cash vega.")
+                st.write("**Rule of Thumb**: Long vega is long fear. If vol spikes 2 pts, your P&L moves by $2 \times \text{Cash Vega}$.")
             elif "1 week" in case:
-                t_impact = model.theta(option_type) * 7 * lots * multiplier * (1 if position_type=="Long" else -1)
-                st.write(f"**Intuition**: Theta is the daily cost of holding the option.")
+                t_impact = model.theta(option_type) * 7 * lots * multiplier * pos_sign
+                st.write(f"**Intuition**: Theta is the daily cost of holding the option (time decay).")
                 st.write(f"• 7-Day Theta Impact: **${t_impact:,.2f}**")
-                st.write("**Rule of Thumb**: Theta accelerates as you get closer to expiry.")
+                st.write("**Rule of Thumb**: Theta is the price you pay for the 'right' to benefit from Gamma.")
             st.markdown('</div>', unsafe_allow_html=True)
 
         st.markdown("---")
@@ -734,7 +758,9 @@ if pricing_ok:
         div_shock = st.slider("Dividend Shock (%)", -5.0, 5.0, 0.0, 0.5)
         if div_shock != 0:
             new_q = max(0, (div_pct + div_shock) / 100.0)
-            new_model = BlackScholesModel(BlackScholesInputs(spot, strike, maturity, vol_pct/100, rate_pct/100, new_q))
+            new_model = BlackScholesModel(BlackScholesInputs(
+                spot, strike, max(maturity, 1e-6), vol_pct/100, rate_pct/100, new_q, repo_pct/100
+            ))
             new_price = new_model.option_price(option_type)
             st.write(f"Price after Dividend Shock: **{new_price:,.4f}** (Change: `{new_price - model.option_price(option_type):+,.4f}`)")
 
@@ -758,10 +784,10 @@ if pricing_ok:
 
         batch_rows = []
         for lot_size in lot_sizes:
-            batch_cash = CashGreeks(model, option_type, lot_size, multiplier)
+            batch_cash = CashGreeks(model, option_type, position_type, lot_size, multiplier)
             batch_rows.append({
                 "Lots": lot_size,
-                "Total Premium": option_price * lot_size * multiplier,
+                "Total Premium": signed_total_price / lots * lot_size, # scaled correctly
                 "Cash Delta": batch_cash.cash_delta(),
                 "Cash Gamma": batch_cash.cash_gamma(),
                 "Cash Vega": batch_cash.cash_vega(),

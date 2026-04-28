@@ -103,8 +103,8 @@ class CashGreeks:
 
     def summary_table(self) -> pd.DataFrame:
         """
-        Return a combined DataFrame of unit Greeks and cash Greeks,
-        suitable for display in the UI.
+        Return a combined DataFrame of unit Greeks and cash Greeks.
+        Both are signed according to the position type.
         """
         unit = self.model.all_greeks(self.option_type)
         cash = self.all_cash_greeks()
@@ -114,7 +114,7 @@ class CashGreeks:
         for name in greek_names:
             rows.append({
                 "Greek": name,
-                "Unit Value": unit[name],
+                "Unit Value (Signed)": unit[name] * self._pos_sign,
                 "Cash Value": cash[f"Cash {name}"],
             })
         return pd.DataFrame(rows)
